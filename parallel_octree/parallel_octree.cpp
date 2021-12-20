@@ -375,14 +375,11 @@ public:
 	{
 	}
 
-	void traverse(const aabb& aabbNode, uint32_t depth, node& currentNode)
+	void traverse(const aabb& aabbNode, uint32_t depth, node& currentNode, bool intersectsOld, bool intersectsNew)
 	{
 		if (depth == _sizeLog)
 			[[unlikely]]
 		{
-			const bool intersectsOld = are_intersected(_shapeMove.aabbOld, aabbNode);
-			const bool intersectsNew = are_intersected(_shapeMove.aabbNew, aabbNode);
-
 			if (intersectsOld && !intersectsNew)
 			{
 				traverser_common<Synchronized>::remove_item(static_cast<leaf&>(currentNode), _shapeMove.Index);
@@ -412,10 +409,17 @@ public:
 private:
 	void traverse(const aabb& aabbNode, uint32_t depth, tree& currentTree, uint32_t octantIndex)
 	{
-		if (are_intersected(_shapeMove.aabbOld, aabbNode) || are_intersected(_shapeMove.aabbNew, aabbNode))
+		const bool intersectsOld = are_intersected(_shapeMove.aabbOld, aabbNode);
+		const bool intersectsNew = are_intersected(_shapeMove.aabbNew, aabbNode);
+
+		if (intersectsOld || intersectsNew)
 			[[unlikely]]
 		{
-			traverse(aabbNode, depth, *traverser_common<Synchronized>::add_octant(_sizeLog, depth, currentTree, octantIndex));
+			traverse(
+				aabbNode, depth,
+				*traverser_common<Synchronized>::add_octant(_sizeLog, depth, currentTree, octantIndex),
+				intersectsOld, intersectsNew
+				);
 		}
 	}
 };
@@ -433,20 +437,22 @@ parallel_octree::~parallel_octree()
 
 void parallel_octree::add_synchronized(const shape_data& shapeData)
 {
-	traverser_add<true> traverser(*this, shapeData);
-	traverser.traverse(initial_aabb(), 0, *_root);
+	traverser_add<true>(*this, shapeData).traverse(initial_aabb(), 0, *_root);
 }
 
 void parallel_octree::remove_synchronized(const shape_data& shapeData)
 {
-	traverser_remove<true> traverser(*this, shapeData);
-	traverser.traverse(initial_aabb(), 0, *_root);
+	traverser_remove<true>(*this, shapeData).traverse(initial_aabb(), 0, *_root);
 }
 
 void parallel_octree::move_synchronized(const shape_move& shapeMove)
 {
-	traverser_move<true> traverser(*this, shapeMove);
-	traverser.traverse(initial_aabb(), 0, *_root);
+	const aabb aabbInitial = initial_aabb();
+	traverser_move<true>(*this, shapeMove).traverse(
+		aabbInitial, 0, *_root,
+		are_intersected(shapeMove.aabbOld, aabbInitial),
+		are_intersected(shapeMove.aabbNew, aabbInitial)
+		);
 }
 
 template <bool Synchronized>
