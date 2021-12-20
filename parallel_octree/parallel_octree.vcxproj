@@ -144,11 +144,15 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="main.cpp" />
+    <ClCompile Include="parallel_octree.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="cache_line.h" />
     <ClInclude Include="chunk_allocator.h" />
+    <ClInclude Include="chunk_pool.h" />
+    <ClInclude Include="parallel_octree.h" />
     <ClInclude Include="relative_ptr.h" />
+    <ClInclude Include="spin_lock.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

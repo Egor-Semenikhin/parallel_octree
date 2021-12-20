@@ -75,8 +75,16 @@ public:
 		return from_diff(_offset);
 	}
 
+	bool compare_exchange(T*& expected, T* desired)
+	{
+		TOffset expectedDiff = get_diff(expected);
+		const bool result = reinterpret_cast<std::atomic<TOffset>&>(_offset).compare_exchange_strong(expectedDiff, get_diff(desired));
+		expected = from_diff(expectedDiff);
+		return result;
+	}
+
 private:
-	static TOffset get_diff(T* ptr)
+	TOffset get_diff(T* ptr)
 	{
 		if (ptr == nullptr)
 		{
@@ -93,7 +101,7 @@ private:
 		return TOffset(diff);
 	}
 
-	static T* from_diff(TOffset offset)
+	T* from_diff(TOffset offset)
 	{
 		if (offset == 0)
 		{

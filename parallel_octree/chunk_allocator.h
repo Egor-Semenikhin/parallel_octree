@@ -7,11 +7,11 @@
 #include <new>
 #include <exception>
 #include <memory>
+#include <cassert>
 
 template <size_t ChinkSize = CACHE_LINE_SIZE>
 class alignas(CACHE_LINE_SIZE) chunk_allocator final
 {
-	static_assert(std::atomic<size_t>::is_lock_free());
 	static_assert(sizeof(size_t) == sizeof(std::atomic<size_t>));
 
 private:
@@ -35,6 +35,7 @@ public:
 		, _data(static_cast<uint8_t*>(operator new (_size, std::align_val_t(CACHE_LINE_SIZE))))
 		, _offset(0)
 	{
+		assert(std::atomic<size_t>().is_lock_free());
 	}
 
 	chunk_allocator(const chunk_allocator&) = delete;
@@ -45,7 +46,7 @@ public:
 	{
 		static_assert(sizeof(T) <= ChinkSize);
 		static_assert(alignof(T) <= ChinkSize);
-		return new (allocate_memory()) T(std::forward<TArgs>(args)...);
+		return new (allocate_memory<Synchronized>()) T(std::forward<TArgs>(args)...);
 	}
 
 private:
@@ -57,7 +58,7 @@ private:
 
 		if constexpr (Synchronized)
 		{
-			prevOffset = static_cast<std::atomic<size_t>&>(_offset).fetch_add(ChinkSize);
+			prevOffset = reinterpret_cast<std::atomic<size_t>&>(_offset).fetch_add(ChinkSize);
 			currentOffset = prevOffset + ChinkSize;
 		}
 		else
