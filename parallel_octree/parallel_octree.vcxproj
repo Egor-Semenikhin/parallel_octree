@@ -149,9 +149,11 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\third_party\task_scheduler\task_scheduler\task_scheduler.h" />
+    <ClInclude Include="aligned_delete.h" />
     <ClInclude Include="cache_line.h" />
     <ClInclude Include="chunk_allocator.h" />
     <ClInclude Include="chunk_pool.h" />
+    <ClInclude Include="octree_allocator.h" />
     <ClInclude Include="parallel_octree.h" />
     <ClInclude Include="relative_ptr.h" />
     <ClInclude Include="spin_lock.h" />

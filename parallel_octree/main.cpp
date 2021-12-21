@@ -34,16 +34,20 @@ static parallel_octree::aabb random_aabb(std::minstd_rand0& rand, float fieldSiz
 
 struct parallel_task final
 {
+	std::atomic<size_t> Count;
+	std::atomic<size_t> Started;
 	std::mutex Mutex;
 	std::condition_variable Conditional;
-	std::atomic<size_t> Count = 0;
+	bool Notified = false;
 };
 
 constexpr size_t count = 50000;
 
 static void parallel_add()
 {
-	parallel_octree octree(10, 256 * 1024 * 1024);
+	task_scheduler taskScheduler(std::thread::hardware_concurrency());
+
+	parallel_octree octree(10, 256 * 1024 * 1024, taskScheduler.threads_count());
 	std::minstd_rand0 rand;
 
 	std::vector<parallel_octree::shape_data> shapes;
@@ -59,24 +63,22 @@ static void parallel_add()
 
 	const auto time0 = std::chrono::high_resolution_clock::now();
 
-	task_scheduler taskScheduler(std::thread::hardware_concurrency());
-
-	const size_t chinkSize = 500;
+	const size_t chinkSize = 1;
 
 	{
-		parallel_task task;
-		task.Count = count / chinkSize;
+		parallel_task task{ count / chinkSize };
 
 		for (size_t i = 0; i < task.Count; ++i)
 		{
 			taskScheduler.schedule_task(
-				[&task, i, &octree, &shapes, chinkSize]()
+				[&task, i, &octree, &shapes, chinkSize](uint32_t workerIndex)
 				{
+					++task.Started;
 					try
 					{
 						for (size_t j = 0; j < chinkSize; ++j)
 						{
-							octree.add_synchronized(shapes[i * chinkSize + j]);
+							octree.add_synchronized(shapes[i * chinkSize + j], workerIndex);
 						}
 					}
 					catch (const std::exception& excp)
@@ -84,8 +86,9 @@ static void parallel_add()
 						std::cerr << "Exception: " << excp.what() << std::endl;
 					}
 					if (--task.Count == 0)
-					[[unlikely]]
+						[[unlikely]]
 					{
+						task.Notified = true;
 						task.Conditional.notify_one();
 					}
 				}
@@ -102,19 +105,19 @@ static void parallel_add()
 	const auto time1 = std::chrono::high_resolution_clock::now();
 
 	{
-		parallel_task task;
-		task.Count = count / chinkSize;
+		parallel_task task{ count / chinkSize };
 
 		for (size_t i = 0; i < task.Count; ++i)
 		{
 			taskScheduler.schedule_task(
-				[&task, i, &octree, &shapes, chinkSize]()
+				[&task, i, &octree, &shapes, chinkSize](uint32_t workerIndex)
 				{
+					++task.Started;
 					try
 					{
 						for (size_t j = 0; j < chinkSize; ++j)
 						{
-							octree.remove_synchronized(shapes[i * chinkSize + j]);
+							octree.remove_synchronized(shapes[i * chinkSize + j], workerIndex);
 						}
 					}
 					catch (const std::exception& excp)
@@ -122,8 +125,9 @@ static void parallel_add()
 						std::cerr << "Exception: " << excp.what() << std::endl;
 					}
 					if (--task.Count == 0)
-					[[unlikely]]
+						[[unlikely]]
 					{
+						task.Notified = true;
 						task.Conditional.notify_one();
 					}
 				}
@@ -148,7 +152,7 @@ static void parallel_add()
 
 static void exclusive_add()
 {
-	parallel_octree octree(10, 256 * 1024 * 1024);
+	parallel_octree octree(10, 256 * 1024 * 1024, std::thread::hardware_concurrency());
 	std::minstd_rand0 rand;
 
 	std::vector<parallel_octree::shape_data> shapes;

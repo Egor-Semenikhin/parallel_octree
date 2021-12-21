@@ -1,6 +1,7 @@
 #pragma once
 
 #include "cache_line.h"
+#include "aligned_delete.h"
 
 #include <cstdint>
 #include <atomic>
@@ -15,17 +16,8 @@ class alignas(CACHE_LINE_SIZE) chunk_allocator final
 	static_assert(sizeof(size_t) == sizeof(std::atomic<size_t>));
 
 private:
-	struct aligned_delete final
-	{
-		void operator()(uint8_t* ptr) const noexcept
-		{
-			operator delete (ptr, std::align_val_t(CACHE_LINE_SIZE));
-		}
-	};
-
-private:
 	const size_t _size;
-	const std::unique_ptr<uint8_t[], aligned_delete> _data;
+	const std::unique_ptr<uint8_t[], aligned_delete<CACHE_LINE_SIZE>> _data;
 
 	alignas(CACHE_LINE_SIZE) size_t _offset;
 
@@ -49,22 +41,23 @@ public:
 		return new (allocate_memory<Synchronized>()) T(std::forward<TArgs>(args)...);
 	}
 
-private:
 	template <bool Synchronized>
-	void* allocate_memory()
+	void* allocate_memory(size_t count = 1)
 	{
 		size_t prevOffset;
 		size_t currentOffset;
 
+		const size_t size = ChinkSize * count;
+
 		if constexpr (Synchronized)
 		{
-			prevOffset = reinterpret_cast<std::atomic<size_t>&>(_offset).fetch_add(ChinkSize);
-			currentOffset = prevOffset + ChinkSize;
+			prevOffset = reinterpret_cast<std::atomic<size_t>&>(_offset).fetch_add(size);
+			currentOffset = prevOffset + size;
 		}
 		else
 		{
 			prevOffset = _offset;
-			_offset = currentOffset = prevOffset + ChinkSize;
+			_offset = currentOffset = prevOffset + size;
 		}
 
 		if (currentOffset > _size)

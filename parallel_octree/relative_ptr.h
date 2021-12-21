@@ -11,22 +11,22 @@ template <typename T, typename TOffset = int32_t>
 class relative_ptr final
 {
 private:
-	TOffset _offset;
+	std::atomic<TOffset> _offset;
 
 public:
 	relative_ptr(T* ptr)
-		: _offset(get_diff(ptr))
+		: _offset (get_diff(ptr))
 	{
 	}
 
 	relative_ptr()
-		: relative_ptr(nullptr)
+		: relative_ptr (nullptr)
 	{
 	}
 
 	template <typename TOtherOffset>
 	relative_ptr(const relative_ptr<T, TOtherOffset>& rhs)
-		: relative_ptr(rhs.get())
+		: relative_ptr (rhs.get())
 	{
 	}
 
@@ -78,7 +78,7 @@ public:
 	bool compare_exchange(T*& expected, T* desired)
 	{
 		TOffset expectedDiff = get_diff(expected);
-		const bool result = reinterpret_cast<std::atomic<TOffset>&>(_offset).compare_exchange_strong(expectedDiff, get_diff(desired));
+		const bool result = _offset.compare_exchange_strong(expectedDiff, get_diff(desired));
 		expected = from_diff(expectedDiff);
 		return result;
 	}

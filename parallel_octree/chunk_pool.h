@@ -58,42 +58,55 @@ public:
 	T* try_allocate(TArgs... args) noexcept
 	{
 		static_assert(sizeof(T) <= ChinkSize);
+		if (void* const memory = try_allocate_memory())
+			[[likely]]
+		{
+			return new (memory) T(std::forward<TArgs>(args)...);
+		}
+		return nullptr;
+	}
 
-		header* h;
-
+	template <bool DoSynchronize>
+	void* try_allocate_memory()
+	{
 		if constexpr (DoSynchronize)
 		{
 			const typename detail::chunk_pool_base<Synchronized>::guard guard(*this);
-			h = try_allocate();
+			return try_allocate();
 		}
 		else
 		{
-			h = try_allocate();
+			return try_allocate();
 		}
+	}
 
-		if (!h)
-		{
-			return nullptr;
-		}
-
-		return new (h) T(std::forward<TArgs>(args)...);
+	template <bool DoSynchronize>
+	void* allocate_memory()
+	{
+		void* const memory = try_allocate_memory<DoSynchronize>();
+		assert(memory);
+		return memory;
 	}
 
 	template <bool DoSynchronize, typename T>
 	void add(T& obj) noexcept
 	{
 		static_assert(sizeof(T) <= ChinkSize);
-
 		obj.~T();
+		add<DoSynchronize>(&obj);
+	}
 
+	template <bool DoSynchronize>
+	void add(void* obj)
+	{
 		if constexpr (DoSynchronize)
 		{
 			const typename detail::chunk_pool_base<Synchronized>::guard guard(*this);
-			add(&obj);
+			do_add(obj);
 		}
 		else
 		{
-			add(&obj);
+			do_add(obj);
 		}
 	}
 
@@ -159,7 +172,7 @@ private:
 		return h;
 	}
 
-	void add(void* obj)
+	void do_add(void* obj)
 	{
 		header* next = _first;
 		_first = static_cast<header*>(obj);

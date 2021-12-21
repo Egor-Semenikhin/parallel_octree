@@ -53,5 +53,11 @@
     <ClInclude Include="..\third_party\task_scheduler\task_scheduler\task_scheduler.h">
       <Filter>third_party\task_scheduler</Filter>
     </ClInclude>
+    <ClInclude Include="octree_allocator.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="aligned_delete.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
 </Project>

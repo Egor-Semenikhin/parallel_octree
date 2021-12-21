@@ -4,6 +4,8 @@
 
 #include <algorithm>
 
+#define NOINLINE __declspec(noinline)
+
 struct parallel_octree::node
 {
 };
@@ -26,82 +28,35 @@ struct parallel_octree::leaf_extension final
 	relative_ptr<leaf_extension> Next;
 };
 
-template <>
-class parallel_octree::traverser<true>
-{
-protected:
-	parallel_octree& _owner;
-
-private:
-	chunk_pool<false> _localPool;
-
-protected:
-	explicit traverser(parallel_octree& owner)
-		: _owner (owner)
-	{
-	}
-
-	~traverser()
-	{
-		_owner._chunkPool.merge<true>(_localPool);
-	}
-
-	template <typename TNode>
-	TNode* allocate_node()
-	{
-		if (TNode* const node = _localPool.try_allocate<TNode, false>())
-		{
-			return node;
-		}
-		return _owner.allocate_node<TNode, true>();
-	}
-
-	template <typename TNode>
-	void deallocate_node(TNode& node)
-	{
-		_localPool.add<false>(node);
-	}
-};
-
-template <>
-class parallel_octree::traverser<false>
-{
-protected:
-	parallel_octree& _owner;
-
-protected:
-	explicit traverser(parallel_octree& owner)
-		: _owner (owner)
-	{
-	}
-
-	template <typename TNode>
-	TNode* allocate_node()
-	{
-		return _owner.allocate_node<TNode, false>();
-	}
-
-	template <typename TNode>
-	void deallocate_node(TNode& node)
-	{
-		_owner._chunkPool.add<false>(node);
-	}
-};
-
 template <bool Synchronized>
-class parallel_octree::traverser_common : protected traverser<Synchronized>
+class parallel_octree::traverser_common
 {
+private:
+	octree_allocator<>& _allocator;
+	octree_allocator<>::local_part& _allocatorLocalPart;
+
 protected:
-	explicit traverser_common(parallel_octree& owner)
-		: traverser<Synchronized> (owner)
+	traverser_common(parallel_octree& owner, uint32_t workerIndex)
+		: _allocator (owner._allocator)
+		, _allocatorLocalPart (owner._allocator.get_local_part(workerIndex))
 	{
 	}
 
-	node* allocate_node(bool isLeaf)
+	template <typename TNode>
+	TNode* allocate_node()
 	{
-		return isLeaf ?
-			static_cast<node*>(traverser<Synchronized>::template allocate_node<leaf>()) :
-			static_cast<node*>(traverser<Synchronized>::template allocate_node<tree>());
+		return _allocator.allocate<TNode, Synchronized>(_allocatorLocalPart);
+	}
+
+	template <typename TNode>
+	void deallocate_node(TNode& node)
+	{
+		_allocator.deallocate(_allocatorLocalPart, node);
+	}
+
+	node* allocate_node(bool isTree)
+	{
+		return isTree ? static_cast<node*>(allocate_node<tree>()) : static_cast<node*>(allocate_node<leaf>());
 	}
 
 	void add_item(leaf& currentLeaf, uint32_t index)
@@ -135,7 +90,7 @@ protected:
 
 			if (!extension)
 			{
-				extension = traverser<Synchronized>::template allocate_node<leaf_extension>();
+				extension = allocate_node<leaf_extension>();
 
 				if constexpr (Synchronized)
 				{
@@ -144,7 +99,7 @@ protected:
 						[[unlikely]]
 					{
 						assert(expected);
-						traverser<Synchronized>::template deallocate_node(*extension);
+						deallocate_node(*extension);
 						extension = expected;
 					}
 				}
@@ -225,8 +180,13 @@ protected:
 			return currentNode;
 		}
 
-		const bool isTree = depth != sizeLog;
-		currentNode = allocate_node(isTree);
+		return allocate_octant(child, depth != sizeLog);
+	}
+
+private:
+	NOINLINE node* allocate_octant(relative_ptr<node>& child, bool isTree)
+	{
+		node* currentNode = allocate_node(isTree);
 
 		if constexpr (Synchronized)
 		{
@@ -237,11 +197,11 @@ protected:
 				assert(expected != nullptr);
 				if (isTree)
 				{
-					traverser<Synchronized>::deallocate_node(static_cast<tree&>(*currentNode));
+					deallocate_node(static_cast<tree&>(*currentNode));
 				}
 				else
 				{
-					traverser<Synchronized>::deallocate_node(static_cast<leaf&>(*currentNode));
+					deallocate_node(static_cast<leaf&>(*currentNode));
 				}
 				currentNode = expected;
 			}
@@ -263,8 +223,8 @@ private:
 	uint32_t _sizeLog;
 
 public:
-	traverser_add(parallel_octree& owner, const shape_data& shapeData)
-		: traverser_common<Synchronized> (owner)
+	traverser_add(parallel_octree& owner, uint32_t workerIndex, const shape_data& shapeData)
+		: traverser_common<Synchronized> (owner, workerIndex)
 		, _shapeData (shapeData)
 		, _sizeLog (owner._sizeLog)
 	{
@@ -313,8 +273,8 @@ private:
 	uint32_t _sizeLog;
 
 public:
-	traverser_remove(parallel_octree& owner, const shape_data& shapeData)
-		: traverser_common<Synchronized> (owner)
+	traverser_remove(parallel_octree& owner, uint32_t workerIndex, const shape_data& shapeData)
+		: traverser_common<Synchronized> (owner, workerIndex)
 		, _shapeData (shapeData)
 		, _sizeLog (owner._sizeLog)
 	{
@@ -347,16 +307,14 @@ public:
 private:
 	void traverse(const aabb& aabbNode, uint32_t depth, tree& currentTree, uint32_t octantIndex)
 	{
-		if (!are_intersected(_shapeData, aabbNode))
-			[[likely]]
+		if (are_intersected(_shapeData, aabbNode))
+			[[unlikely]]
 		{
-			return;
+			node* currentNode = currentTree.Children[octantIndex].get();
+			assert(currentNode);
+
+			traverse(aabbNode, depth, *currentNode);
 		}
-
-		node* currentNode = currentTree.Children[octantIndex].get();
-		assert(currentNode);
-
-		traverse(aabbNode, depth, *currentNode);
 	}
 };
 
@@ -368,8 +326,8 @@ private:
 	uint32_t _sizeLog;
 
 public:
-	traverser_move(parallel_octree& owner, const shape_move& shapeMove)
-		: traverser_common<Synchronized> (owner)
+	traverser_move(parallel_octree& owner, uint32_t workerIndex, const shape_move& shapeMove)
+		: traverser_common<Synchronized> (owner, workerIndex)
 		, _shapeMove (shapeMove)
 		, _sizeLog (owner._sizeLog)
 	{
@@ -424,9 +382,9 @@ private:
 	}
 };
 
-parallel_octree::parallel_octree(uint32_t sizeLog, size_t bufferSize)
-	: _chunkAllocator (bufferSize)
-	, _root (allocate_node<false>(sizeLog > 0))
+parallel_octree::parallel_octree(uint32_t sizeLog, uint32_t bufferSize, uint32_t workersCount)
+	: _allocator (bufferSize, workersCount)
+	, _root (sizeLog > 0 ? static_cast<node*>(_allocator.allocate<tree, false>()) : static_cast<node*>(_allocator.allocate<leaf, false>()))
 	, _sizeLog (sizeLog)
 {
 }
@@ -435,20 +393,20 @@ parallel_octree::~parallel_octree()
 {
 }
 
-void parallel_octree::add_synchronized(const shape_data& shapeData)
+void parallel_octree::add_synchronized(const shape_data& shapeData, uint32_t workerIndex)
 {
-	traverser_add<true>(*this, shapeData).traverse(initial_aabb(), 0, *_root);
+	traverser_add<true>(*this, workerIndex, shapeData).traverse(initial_aabb(), 0, *_root);
 }
 
-void parallel_octree::remove_synchronized(const shape_data& shapeData)
+void parallel_octree::remove_synchronized(const shape_data& shapeData, uint32_t workerIndex)
 {
-	traverser_remove<true>(*this, shapeData).traverse(initial_aabb(), 0, *_root);
+	traverser_remove<true>(*this, workerIndex, shapeData).traverse(initial_aabb(), 0, *_root);
 }
 
-void parallel_octree::move_synchronized(const shape_move& shapeMove)
+void parallel_octree::move_synchronized(const shape_move& shapeMove, uint32_t workerIndex)
 {
 	const aabb aabbInitial = initial_aabb();
-	traverser_move<true>(*this, shapeMove).traverse(
+	traverser_move<true>(*this, workerIndex, shapeMove).traverse(
 		aabbInitial, 0, *_root,
 		are_intersected(shapeMove.aabbOld, aabbInitial),
 		are_intersected(shapeMove.aabbNew, aabbInitial)
@@ -457,28 +415,12 @@ void parallel_octree::move_synchronized(const shape_move& shapeMove)
 
 void parallel_octree::add_exclusive(const shape_data& shapeData)
 {
-	traverser_add<false>(*this, shapeData).traverse(initial_aabb(), 0, *_root);
+	traverser_add<false>(*this, 0, shapeData).traverse(initial_aabb(), 0, *_root);
 }
 
 void parallel_octree::remove_exclusive(const shape_data& shapeData)
 {
-	traverser_remove<false>(*this, shapeData).traverse(initial_aabb(), 0, *_root);
-}
-
-template <bool Synchronized>
-parallel_octree::node* parallel_octree::allocate_node(bool isTree)
-{
-	return isTree ? static_cast<node*>(allocate_node<tree, Synchronized>()) : static_cast<node*>(allocate_node<leaf, Synchronized>());
-}
-
-template <typename TNode, bool Synchronized>
-TNode* parallel_octree::allocate_node()
-{
-	if (TNode* const currentNode = _chunkPool.try_allocate<TNode, Synchronized>())
-	{
-		return currentNode;
-	}
-	return _chunkAllocator.allocate<TNode, Synchronized>();
+	traverser_remove<false>(*this, 0, shapeData).traverse(initial_aabb(), 0, *_root);
 }
 
 float parallel_octree::field_size() const

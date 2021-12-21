@@ -3,8 +3,7 @@
 #include <cstdint>
 #include <memory>
 
-#include "chunk_allocator.h"
-#include "chunk_pool.h"
+#include "octree_allocator.h"
 
 class parallel_octree final
 {
@@ -40,9 +39,6 @@ private:
 	struct leaf_extension;
 
 	template <bool Synchronized>
-	class traverser;
-
-	template <bool Synchronized>
 	class traverser_common;
 
 	template <bool Synchronized>
@@ -55,32 +51,25 @@ private:
 	class traverser_move;
 
 private:
-	chunk_allocator<> _chunkAllocator;
-	chunk_pool<true> _chunkPool;
+	octree_allocator<> _allocator;
 
 	node* _root;
 	uint32_t _sizeLog;
 
 public:
-	explicit parallel_octree(uint32_t sizeLog, size_t bufferSize);
+	explicit parallel_octree(uint32_t sizeLog, uint32_t bufferSize, uint32_t workersCount);
 	~parallel_octree();
 
 	float field_size() const;
 
-	void add_synchronized(const shape_data& shapeData);
-	void remove_synchronized(const shape_data& shapeData);
-	void move_synchronized(const shape_move& shapeMove);
+	void add_synchronized(const shape_data& shapeData, uint32_t workerIndex);
+	void remove_synchronized(const shape_data& shapeData, uint32_t workerIndex);
+	void move_synchronized(const shape_move& shapeMove, uint32_t workerIndex);
 
 	void add_exclusive(const shape_data& shapeData);
 	void remove_exclusive(const shape_data& shapeData);
 
 private:
-	template <bool Synchronized>
-	node* allocate_node(bool isTree);
-
-	template <typename TNode, bool Synchronized>
-	TNode* allocate_node();
-
 	aabb initial_aabb() const;
 
 	static aabb aabb_0(const aabb& aabb, const point& centre);
