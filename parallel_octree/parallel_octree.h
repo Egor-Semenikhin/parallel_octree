@@ -65,9 +65,14 @@ public:
 	explicit parallel_octree(uint32_t sizeLog, size_t bufferSize);
 	~parallel_octree();
 
+	float field_size() const;
+
 	void add_synchronized(const shape_data& shapeData);
 	void remove_synchronized(const shape_data& shapeData);
 	void move_synchronized(const shape_move& shapeMove);
+
+	void add_exclusive(const shape_data& shapeData);
+	void remove_exclusive(const shape_data& shapeData);
 
 private:
 	template <bool Synchronized>
@@ -76,7 +81,6 @@ private:
 	template <typename TNode, bool Synchronized>
 	TNode* allocate_node();
 
-	float field_size() const;
 	aabb initial_aabb() const;
 
 	static aabb aabb_0(const aabb& aabb, const point& centre);

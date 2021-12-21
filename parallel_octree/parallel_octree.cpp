@@ -455,6 +455,16 @@ void parallel_octree::move_synchronized(const shape_move& shapeMove)
 		);
 }
 
+void parallel_octree::add_exclusive(const shape_data& shapeData)
+{
+	traverser_add<false>(*this, shapeData).traverse(initial_aabb(), 0, *_root);
+}
+
+void parallel_octree::remove_exclusive(const shape_data& shapeData)
+{
+	traverser_remove<false>(*this, shapeData).traverse(initial_aabb(), 0, *_root);
+}
+
 template <bool Synchronized>
 parallel_octree::node* parallel_octree::allocate_node(bool isTree)
 {

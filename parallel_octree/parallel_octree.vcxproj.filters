@@ -13,6 +13,12 @@
       <UniqueIdentifier>{67DA6AB6-F800-4c08-8B7A-83BB121AAD01}</UniqueIdentifier>
       <Extensions>rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tiff;tif;png;wav;mfcribbon-ms</Extensions>
     </Filter>
+    <Filter Include="third_party">
+      <UniqueIdentifier>{f152364c-d4e1-4a4d-835c-d34bb32324f8}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="third_party\task_scheduler">
+      <UniqueIdentifier>{7fc5a123-d631-4857-9f12-6bded8d50eb3}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="main.cpp">
@@ -20,6 +26,9 @@
     </ClCompile>
     <ClCompile Include="parallel_octree.cpp">
       <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="..\third_party\task_scheduler\task_scheduler\task_scheduler.cpp">
+      <Filter>third_party\task_scheduler</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
@@ -40,6 +49,9 @@
     </ClInclude>
     <ClInclude Include="parallel_octree.h">
       <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="..\third_party\task_scheduler\task_scheduler\task_scheduler.h">
+      <Filter>third_party\task_scheduler</Filter>
     </ClInclude>
   </ItemGroup>
 </Project>

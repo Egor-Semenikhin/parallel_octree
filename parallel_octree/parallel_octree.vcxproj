@@ -143,10 +143,12 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="..\third_party\task_scheduler\task_scheduler\task_scheduler.cpp" />
     <ClCompile Include="main.cpp" />
     <ClCompile Include="parallel_octree.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="..\third_party\task_scheduler\task_scheduler\task_scheduler.h" />
     <ClInclude Include="cache_line.h" />
     <ClInclude Include="chunk_allocator.h" />
     <ClInclude Include="chunk_pool.h" />
