@@ -3,6 +3,7 @@
 #include <vector>
 #include <memory>
 #include <cassert>
+#include <mutex>
 
 #include "chunk_allocator.h"
 #include "chunk_pool.h"
@@ -28,6 +29,7 @@ private:
 private:
 	chunk_allocator<ChinkSize> _chunkAllocator;
 
+	std::mutex _addPoolsMutex;
 	std::vector<chunk_pool<false, ChinkSize>> _pools;
 	std::unique_ptr<local_part_impl[]> _localParts;
 	uint32_t _localPartsCount;
@@ -48,6 +50,68 @@ public:
 	{
 		assert(index < _localPartsCount);
 		return _localParts[index];
+	}
+
+	void prepare_gc()
+	{
+		if (!_poolOffset)
+			[[unlikely]]
+		{
+			return;
+		}
+
+		const bool poolsNotEmpty = _pools.size() > _poolOffset;
+
+		if (poolsNotEmpty)
+			[[likely]]
+		{
+			std::vector<chunk_pool<false, ChinkSize>> newPools;
+			newPools.reserve(_pools.size() - _poolOffset);
+			for (auto iter = _pools.begin() + _poolOffset; iter != _pools.end(); ++iter)
+			{
+				newPools.emplace_back(std::move(*iter));
+			}
+			_pools = std::move(newPools);
+			_poolOffset = 0;
+		}
+		else
+		{
+			_pools.clear();
+		}
+
+		for (uint32_t i = 0; i < _localPartsCount; ++i)
+		{
+			_localParts[i].PoolsNotEmpty = poolsNotEmpty;
+		}
+	}
+
+	void add_pools(std::pmr::vector<chunk_pool<false, ChinkSize>>&& pools)
+	{
+		if (pools.size() == 0)
+			[[unlikely]]
+		{
+			return;
+		}
+
+		const std::lock_guard<std::mutex> guard(_addPoolsMutex);
+
+		assert(_poolOffset == 0);
+
+		if (_pools.size() == 0)
+			[[unlikely]]
+		{
+			for (uint32_t i = 0; i < _localPartsCount; ++i)
+			{
+				_localParts[i].PoolsNotEmpty = true;
+			}
+		}
+
+		for (chunk_pool<false, ChinkSize>& pool : pools)
+		{
+			_pools.emplace_back(std::move(pool));
+		}
+
+		pools.clear();
 	}
 
 	template <typename T, bool Synchronized, typename ... TArgs>

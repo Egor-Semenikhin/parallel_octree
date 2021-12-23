@@ -51,8 +51,19 @@ private:
 public:
 	chunk_pool() noexcept {}
 
+	template <bool PoolSynchronized>
+	chunk_pool(chunk_pool<PoolSynchronized, ChinkSize>&& pool)
+		: _first (pool.take<true>())
+	{
+	}
+
 	chunk_pool(const chunk_pool<Synchronized, ChinkSize>&) = delete;
 	const chunk_pool<Synchronized, ChinkSize>& operator = (const chunk_pool<Synchronized, ChinkSize>&) = delete;
+
+	bool is_empty() const
+	{
+		return !_first;
+	}
 
 	template <typename T, bool DoSynchronize, typename ... TArgs>
 	T* try_allocate(TArgs... args) noexcept

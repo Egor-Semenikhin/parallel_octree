@@ -59,5 +59,8 @@
     <ClInclude Include="aligned_delete.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="parallel_octree_gc.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
 </Project>

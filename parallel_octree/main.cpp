@@ -4,9 +4,10 @@
 #include <condition_variable>
 #include <chrono>
 #include <thread>
+#include <memory_resource>
 
 #include "parallel_octree.h"
-#include "../third_party/task_scheduler/task_scheduler/task_scheduler.h"
+#include "task_scheduler.h"
 
 static float random_float(std::minstd_rand0& rand)
 {
@@ -35,13 +36,11 @@ static parallel_octree::aabb random_aabb(std::minstd_rand0& rand, float fieldSiz
 struct parallel_task final
 {
 	std::atomic<size_t> Count;
-	std::atomic<size_t> Started;
 	std::mutex Mutex;
 	std::condition_variable Conditional;
-	bool Notified = false;
 };
 
-constexpr size_t count = 50000;
+constexpr size_t count = 100000;
 
 static void parallel_add()
 {
@@ -63,22 +62,26 @@ static void parallel_add()
 
 	const auto time0 = std::chrono::high_resolution_clock::now();
 
-	const size_t chinkSize = 1;
+	const size_t chinkSize = 80;
+	const size_t taskCount = (count + chinkSize - 1) / chinkSize;
 
 	{
-		parallel_task task{ count / chinkSize };
+		parallel_task task{ taskCount };
 
-		for (size_t i = 0; i < task.Count; ++i)
+		for (size_t i = 0; i < taskCount; ++i)
 		{
 			taskScheduler.schedule_task(
 				[&task, i, &octree, &shapes, chinkSize](uint32_t workerIndex)
 				{
-					++task.Started;
 					try
 					{
 						for (size_t j = 0; j < chinkSize; ++j)
 						{
-							octree.add_synchronized(shapes[i * chinkSize + j], workerIndex);
+							const size_t index = i * chinkSize + j;
+							if (index < shapes.size())
+							{
+								octree.add_synchronized(shapes[index], workerIndex);
+							}
 						}
 					}
 					catch (const std::exception& excp)
@@ -88,7 +91,6 @@ static void parallel_add()
 					if (--task.Count == 0)
 						[[unlikely]]
 					{
-						task.Notified = true;
 						task.Conditional.notify_one();
 					}
 				}
@@ -105,19 +107,22 @@ static void parallel_add()
 	const auto time1 = std::chrono::high_resolution_clock::now();
 
 	{
-		parallel_task task{ count / chinkSize };
+		parallel_task task{ taskCount };
 
-		for (size_t i = 0; i < task.Count; ++i)
+		for (size_t i = 0; i < taskCount; ++i)
 		{
 			taskScheduler.schedule_task(
 				[&task, i, &octree, &shapes, chinkSize](uint32_t workerIndex)
 				{
-					++task.Started;
 					try
 					{
 						for (size_t j = 0; j < chinkSize; ++j)
 						{
-							octree.remove_synchronized(shapes[i * chinkSize + j], workerIndex);
+							const size_t index = i * chinkSize + j;
+							if (index < shapes.size())
+							{
+								octree.remove_synchronized(shapes[index], workerIndex);
+							}
 						}
 					}
 					catch (const std::exception& excp)
@@ -127,7 +132,6 @@ static void parallel_add()
 					if (--task.Count == 0)
 						[[unlikely]]
 					{
-						task.Notified = true;
 						task.Conditional.notify_one();
 					}
 				}
@@ -143,12 +147,101 @@ static void parallel_add()
 
 	const auto time2 = std::chrono::high_resolution_clock::now();
 
-	std::chrono::duration<double> timeSpanAdd = std::chrono::duration_cast<std::chrono::duration<double>>(time1 - time0);
-	std::chrono::duration<double> timeSpanRemove = std::chrono::duration_cast<std::chrono::duration<double>>(time2 - time1);
+	char gcBuffer[4 * 1024];
+	std::pmr::monotonic_buffer_resource bufferResource(gcBuffer, sizeof(gcBuffer));
+	std::pmr::vector<parallel_octree::gc_root> roots{ std::pmr::polymorphic_allocator<parallel_octree::gc_root>(&bufferResource) };
+
+	octree.prepare_garbage_collection(roots);
+
+	const auto time3 = std::chrono::high_resolution_clock::now();
+
+	{
+		parallel_task task{ roots.size() };
+
+		for (size_t i = 0; i < roots.size(); ++i)
+		{
+			taskScheduler.schedule_task(
+				[&task, i, &octree, &roots](uint32_t workerIndex)
+				{
+					try
+					{
+						octree.collect_garbage(roots[i]);
+					}
+					catch (const std::exception& excp)
+					{
+						std::cerr << "Exception: " << excp.what() << std::endl;
+					}
+					if (--task.Count == 0)
+						[[unlikely]]
+					{
+						task.Conditional.notify_one();
+					}
+				}
+			);
+		}
+
+		if (task.Count > 0)
+		{
+			std::unique_lock<std::mutex> lock(task.Mutex);
+			task.Conditional.wait(lock, [&task]() { return task.Count == 0; });
+		}
+	}
+
+	const auto time4 = std::chrono::high_resolution_clock::now();
+
+	{
+		parallel_task task{ taskCount };
+
+		for (size_t i = 0; i < taskCount; ++i)
+		{
+			taskScheduler.schedule_task(
+				[&task, i, &octree, &shapes, chinkSize](uint32_t workerIndex)
+				{
+					try
+					{
+						for (size_t j = 0; j < chinkSize; ++j)
+						{
+							const size_t index = i * chinkSize + j;
+							if (index < shapes.size())
+							{
+								octree.add_synchronized(shapes[index], workerIndex);
+							}
+						}
+					}
+					catch (const std::exception& excp)
+					{
+						std::cerr << "Exception: " << excp.what() << std::endl;
+					}
+					if (--task.Count == 0)
+						[[unlikely]]
+					{
+						task.Conditional.notify_one();
+					}
+				}
+			);
+		}
+
+		if (task.Count > 0)
+		{
+			std::unique_lock<std::mutex> lock(task.Mutex);
+			task.Conditional.wait(lock, [&task]() { return task.Count == 0; });
+		}
+	}
+
+	const auto time5 = std::chrono::high_resolution_clock::now();
+
+	const std::chrono::duration<double> timeSpanAdd = std::chrono::duration_cast<std::chrono::duration<double>>(time1 - time0);
+	const std::chrono::duration<double> timeSpanRemove = std::chrono::duration_cast<std::chrono::duration<double>>(time2 - time1);
+	const std::chrono::duration<double> timeSpanRoots = std::chrono::duration_cast<std::chrono::duration<double>>(time3 - time2);
+	const std::chrono::duration<double> timeSpanGC = std::chrono::duration_cast<std::chrono::duration<double>>(time4 - time3);
+	const std::chrono::duration<double> timeSpanAddPlus = std::chrono::duration_cast<std::chrono::duration<double>>(time5 - time4);
+
 	std::cout << "Parallel  add    " << timeSpanAdd.count() * 1000 << " ms." << std::endl;
 	std::cout << "Parallel  remove " << timeSpanRemove.count() * 1000 << " ms." << std::endl;
+	std::cout << "Parallel  roots  " << timeSpanRoots.count() * 1000 << " ms." << std::endl;
+	std::cout << "Parallel  gc     " << timeSpanGC.count() * 1000 << " ms." << std::endl;
+	std::cout << "Parallel  add+   " << timeSpanAddPlus.count() * 1000 << " ms." << std::endl;
 }
-
 
 static void exclusive_add()
 {
@@ -161,7 +254,7 @@ static void exclusive_add()
 	for (uint32_t i = 0; i < count; ++i)
 	{
 		parallel_octree::shape_data shape;
-		shape.AABB = random_aabb(rand, 10, random_float(rand) + 0.1f);
+		shape.AABB = random_aabb(rand, octree.field_size(), random_float(rand) + 0.1f);
 		shape.Index = i;
 		shapes.push_back(shape);
 	}
@@ -182,14 +275,43 @@ static void exclusive_add()
 
 	const auto time2 = std::chrono::high_resolution_clock::now();
 
-	std::chrono::duration<double> timeSpanAdd = std::chrono::duration_cast<std::chrono::duration<double>>(time1 - time0);
-	std::chrono::duration<double> timeSpanRemove = std::chrono::duration_cast<std::chrono::duration<double>>(time2 - time1);
+	char gcBuffer[4 * 1024];
+	std::pmr::monotonic_buffer_resource bufferResource(gcBuffer, sizeof(gcBuffer));
+	std::pmr::vector<parallel_octree::gc_root> roots{ std::pmr::polymorphic_allocator<parallel_octree::gc_root>(&bufferResource) };
+
+	octree.prepare_garbage_collection(roots);
+
+	const auto time3 = std::chrono::high_resolution_clock::now();
+
+	for (const parallel_octree::gc_root& root : roots)
+	{
+		octree.collect_garbage(root);
+	}
+
+	const auto time4 = std::chrono::high_resolution_clock::now();
+
+	for (size_t i = 0; i < count; ++i)
+	{
+		octree.add_exclusive(shapes[i]);
+	}
+
+	const auto time5 = std::chrono::high_resolution_clock::now();
+
+	const std::chrono::duration<double> timeSpanAdd = std::chrono::duration_cast<std::chrono::duration<double>>(time1 - time0);
+	const std::chrono::duration<double> timeSpanRemove = std::chrono::duration_cast<std::chrono::duration<double>>(time2 - time1);
+	const std::chrono::duration<double> timeSpanRoots = std::chrono::duration_cast<std::chrono::duration<double>>(time3 - time2);
+	const std::chrono::duration<double> timeSpanGC = std::chrono::duration_cast<std::chrono::duration<double>>(time4 - time3);
+	const std::chrono::duration<double> timeSpanAddPlus = std::chrono::duration_cast<std::chrono::duration<double>>(time5 - time4);
+
 	std::cout << "Exclusive add    " << timeSpanAdd.count() * 1000 << " ms." << std::endl;
 	std::cout << "Exclusive remove " << timeSpanRemove.count() * 1000 << " ms." << std::endl;
+	std::cout << "Exclusive roots  " << timeSpanRoots.count() * 1000 << " ms." << std::endl;
+	std::cout << "Exclusive gc     " << timeSpanGC.count() * 1000 << " ms." << std::endl;
+	std::cout << "Exclusive add+   " << timeSpanAddPlus.count() * 1000 << " ms." << std::endl;
 }
 
 int main()
 {
 	exclusive_add();
-	parallel_add();
+	//parallel_add();
 }

@@ -7,6 +7,27 @@
 
 class parallel_octree final
 {
+private:
+	struct node;
+	struct tree;
+	struct leaf;
+	struct leaf_extension;
+
+	template <bool Synchronized>
+	class traverser_common;
+
+	template <bool Synchronized>
+	class traverser_add;
+
+	template <bool Synchronized>
+	class traverser_remove;
+
+	template <bool Synchronized>
+	class traverser_move;
+
+	class traverser_gc_roots;
+	class traverser_gc;
+
 public:
 	static constexpr uint32_t InvalidIndex = 0xFFFFFFFFu;
 
@@ -32,23 +53,10 @@ public:
 		uint32_t Index;
 	};
 
-private:
-	struct node;
-	struct tree;
-	struct leaf;
-	struct leaf_extension;
-
-	template <bool Synchronized>
-	class traverser_common;
-
-	template <bool Synchronized>
-	class traverser_add;
-
-	template <bool Synchronized>
-	class traverser_remove;
-
-	template <bool Synchronized>
-	class traverser_move;
+	struct gc_root final
+	{
+		tree& Tree;
+	};
 
 private:
 	octree_allocator<> _allocator;
@@ -60,6 +68,9 @@ public:
 	explicit parallel_octree(uint32_t sizeLog, uint32_t bufferSize, uint32_t workersCount);
 	~parallel_octree();
 
+	parallel_octree(const parallel_octree&) = delete;
+	const parallel_octree& operator = (const parallel_octree&) = delete;
+
 	float field_size() const;
 
 	void add_synchronized(const shape_data& shapeData, uint32_t workerIndex);
@@ -68,6 +79,10 @@ public:
 
 	void add_exclusive(const shape_data& shapeData);
 	void remove_exclusive(const shape_data& shapeData);
+	void move_exclusive(const shape_move& shapeMove);
+
+	void prepare_garbage_collection(std::pmr::vector<gc_root>& roots, uint32_t depth = 2);
+	void collect_garbage(gc_root root);
 
 private:
 	aabb initial_aabb() const;
