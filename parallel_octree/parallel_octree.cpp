@@ -328,7 +328,7 @@ public:
 			traverser_common<Synchronized>::set_gc_hint(currentTree.GCHint, depth - 1);
 		}
 
-		return markForGC || currentTree.GCHint != 0;
+		return markForGC;
 	}
 
 private:
@@ -718,7 +718,10 @@ parallel_octree::aabb parallel_octree::initial_aabb() const
 
 parallel_octree::aabb parallel_octree::aabb_0(const aabb& aabb, const point& centre)
 {
-	return { aabb.Min, centre };
+	return {
+		{ aabb.Min.X, aabb.Min.Y, aabb.Min.Z },
+		{   centre.X,   centre.Y,   centre.Z }
+	};
 }
 
 parallel_octree::aabb parallel_octree::aabb_1(const aabb& aabb, const point& centre)
@@ -764,14 +767,17 @@ parallel_octree::aabb parallel_octree::aabb_5(const aabb& aabb, const point& cen
 parallel_octree::aabb parallel_octree::aabb_6(const aabb& aabb, const point& centre)
 {
 	return {
-		{   centre.X,   centre.Y,    centre.Z },
-		{ aabb.Max.X, aabb.Max.Y,   centre.Z }
+		{   centre.X, aabb.Min.Y,   centre.Z },
+		{ aabb.Max.X,   centre.Y, aabb.Max.Z }
 	};
 }
 
 parallel_octree::aabb parallel_octree::aabb_7(const aabb& aabb, const point& centre)
 {
-	return { centre, aabb.Max };
+	return {
+		{   centre.X,   centre.Y,   centre.Z },
+		{ aabb.Max.X, aabb.Max.Y, aabb.Max.Z }
+	};
 }
 
 bool parallel_octree::are_intersected(const aabb& left, const aabb& right)

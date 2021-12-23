@@ -310,8 +310,23 @@ static void exclusive_add()
 	std::cout << "Exclusive add+   " << timeSpanAddPlus.count() * 1000 << " ms." << std::endl;
 }
 
+static void test1()
+{
+	parallel_octree octree(1, 256 * 1024 * 1024, std::thread::hardware_concurrency());
+
+	octree.add_exclusive({ { { 0 + 0.4f, 0 + 0.4f, 0 + 0.4f }, { 0 + 0.6f, 0 + 0.6f, 0 + 0.6f } }, 0 });
+	octree.add_exclusive({ { { 1 + 0.4f, 0 + 0.4f, 0 + 0.4f }, { 1 + 0.6f, 0 + 0.6f, 0 + 0.6f } }, 1 });
+	octree.add_exclusive({ { { 0 + 0.4f, 1 + 0.4f, 0 + 0.4f }, { 0 + 0.6f, 1 + 0.6f, 0 + 0.6f } }, 2 });
+	octree.add_exclusive({ { { 0 + 0.4f, 0 + 0.4f, 1 + 0.4f }, { 0 + 0.6f, 0 + 0.6f, 1 + 0.6f } }, 3 });
+	octree.add_exclusive({ { { 1 + 0.4f, 1 + 0.4f, 0 + 0.4f }, { 1 + 0.6f, 1 + 0.6f, 0 + 0.6f } }, 4 });
+	octree.add_exclusive({ { { 1 + 0.4f, 0 + 0.4f, 1 + 0.4f }, { 1 + 0.6f, 0 + 0.6f, 1 + 0.6f } }, 5 });
+	octree.add_exclusive({ { { 0 + 0.4f, 1 + 0.4f, 1 + 0.4f }, { 0 + 0.6f, 1 + 0.6f, 1 + 0.6f } }, 6 });
+	octree.add_exclusive({ { { 1 + 0.4f, 1 + 0.4f, 1 + 0.4f }, { 1 + 0.6f, 1 + 0.6f, 1 + 0.6f } }, 7 });
+}
+
 int main()
 {
+	//test1();
 	exclusive_add();
-	//parallel_add();
+	parallel_add();
 }
